@@ -11,11 +11,15 @@
 (def jws-algorithm "hs215")
 (def auth-backend (jws-backend {:secret secret :options {:alg (keyword jws-algorithm)}}))
 
+;;;; Helpers
+
 (defn response [status body & {:as headers}]
   {:status status :body body :headers headers})
 
 (def ok (partial response 200))
 (def bad-request (partial response 400))
+
+;;;; Interceptors and handlers
 
 (def greet
   {:name :greet
@@ -63,8 +67,7 @@
   (stop-dev)
   (start-dev))
 
-(defn test-request [verb url]
-  (test/response-for (::http/service-fn @server) verb url))
+(def test-request (partial test/response-for (::http/service-fn @server)))
 
 (comment
   (start-dev)
@@ -72,6 +75,6 @@
   (restart)
 
   (test-request :get "/")
-  (test/response-for (::http/service-fn @server) :post "/login"
-                     :headers {"Content-Type" "application/edn"}
-                     :body (pr-str {:username "admin" :password "admin-password"})))
+  (test-request :post "/login"
+                :headers {"Content-Type" "application/edn"}
+                :body (pr-str {:username "admin" :password "admin-password"})))
