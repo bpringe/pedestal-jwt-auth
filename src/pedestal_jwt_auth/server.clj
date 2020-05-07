@@ -2,25 +2,41 @@
   (:require [io.pedestal.http :as http]
             [io.pedestal.http.body-params :refer [body-params]]
             [io.pedestal.http.route :as route]
-            [io.pedestal.test :as test]))
+            [io.pedestal.test :as test]
+            [java-time :as jt]
+            [buddy.sign.jwt :as jwt]
+            [buddy.auth.backends.token :refer [jws-backend]]))
+
+(def secret "mysupersecret")
+(def jws-algorithm "hs215")
+(def auth-backend (jws-backend {:secret secret :options {:alg (keyword jws-algorithm)}}))
 
 (defn response [status body & {:as headers}]
   {:status status :body body :headers headers})
 
 (def ok (partial response 200))
+(def bad-request (partial response 400))
 
 (def greet
   {:name :greet
    :enter
    (fn [context]
-     (assoc context :response (ok " This route will greet a logged in user by name")))})
+     (assoc context :response (ok "This route will greet a logged in user by name")))})
 
-(def login
-  {:name :login
-   :enter
-   (fn [context]
-     (def request (:request context))
-     (assoc context :response (ok "This route will verify a username and password and return a token for the user")))})
+;; TODO: Implement some real check
+(defn valid-user?
+  [username password]
+  true)
+
+(defn login [request]
+  (let [username (get-in request [:edn-params :username])
+        password (get-in request [:edn-params :password])]
+    (if (valid-user? username password)
+      (let [claims {:user username
+                    :exp (-> (jt/instant) (jt/plus (jt/days 1)) .toEpochMilli)}
+            token (jwt/sign claims secret {:alg :hs512})]
+        (ok {:token token}))
+      (bad-request {:message "Username or password is incorrect"}))))
 
 (def routes
   #{["/" :get greet :route-name :greet]
@@ -54,7 +70,7 @@
   (start-dev)
   (stop-dev)
   (restart)
-  
+
   (test-request :get "/")
   (test/response-for (::http/service-fn @server) :post "/login"
                      :headers {"Content-Type" "application/edn"}
