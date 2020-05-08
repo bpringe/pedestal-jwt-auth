@@ -8,7 +8,8 @@
             [buddy.sign.jwt :as jwt]
             [buddy.auth.backends.token :refer [jws-backend]]
             [buddy.auth :as auth]
-            [buddy.auth.middleware :as auth.middleware]))
+            [buddy.auth.middleware :as auth.middleware]
+            [buddy.auth.accessrules :refer [wrap-access-rules]]))
 ;;;; Config
 
 (def secret "mysupersecret")
@@ -69,12 +70,6 @@
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
 
-(def routes
-  #{["/" :get [handle-error authenticate greet] :route-name :greet]
-    ["/login" :post [(body-params) login] :route-name :login]})
-
-;;;; Rule handlers and access rules
-
 (defn authenticated-access [request]
   (boolean (:identity request)))
 
@@ -83,14 +78,31 @@
   (bad-request "Request is not authenticated (access rule error)"))
 
 (defn admin-access [request]
+  (prn "running admin-access handler")
   (let [roles (-> request :identity :roles)]
     (boolean (roles :admin))))
 
-(def access-rules [{:pattern #"^/admin/.*"
+(def access-rules [{:pattern #"^/admin.*"
                     :handler admin-access}
                    {:pattern #"^/.*"
                     :handler authenticated-access
                     :on-error authenticated-access-error-fn}])
+
+(def authorize
+  {:name ::authorize
+   :enter
+   (fn [context]
+     (let [request (:request context)
+           handler (wrap-access-rules identity
+                                      {:rules access-rules})
+           result (handler request)]
+       (prn "result:" result)
+       context))})
+
+(def routes
+  #{["/" :get [handle-error authenticate greet] :route-name :greet]
+    ["/login" :post [(body-params) login] :route-name :login]
+    ["/admin" :get [handle-error authenticate authorize greet] :route-name :admin]})
 
 (def service-map
   {::http/routes #(route/expand-routes routes)
@@ -123,7 +135,7 @@
   (start-dev)
   (stop-dev)
   (restart)
-  
+
   (apply str "1" "2" nil)
 
   (test-request :get "/")
@@ -133,9 +145,10 @@
                  :body
                  clojure.edn/read-string
                  :token))
-  
   (test-request :get "/"
-                :headers 
-                {"Authorization" (str "Token " token)
-                 "Content-Type" "application/edn"}))
+                :headers
+                {"Authorization" (str "Token " token)})
+  (test-request :get "/admin"
+                :headers
+                {"Authorization" (str "Token " token)}))
 
