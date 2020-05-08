@@ -73,10 +73,29 @@
   #{["/" :get [handle-error authenticate greet] :route-name :greet]
     ["/login" :post [(body-params) login] :route-name :login]})
 
+;;;; Rule handlers and access rules
+
+(defn authenticated-access [request]
+  (boolean (:identity request)))
+
+(defn authenticated-access-error-fn
+  [req value]
+  (bad-request "Request is not authenticated (access rule error)"))
+
+(defn admin-access [request]
+  (let [roles (-> request :identity :roles)]
+    (boolean (roles :admin))))
+
+(def access-rules [{:pattern #"^/admin/.*"
+                    :handler admin-access}
+                   {:pattern #"^/.*"
+                    :handler authenticated-access
+                    :on-error authenticated-access-error-fn}])
+
 (def service-map
   {::http/routes #(route/expand-routes routes)
    ::http/type :jetty
-   ::http/port 8890})
+   ::http/port service-port})
 
 ;;;; For interactive development
 
