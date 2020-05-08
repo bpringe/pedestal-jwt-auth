@@ -35,6 +35,9 @@
        (assoc ctx :io.pedestal.interceptor.error/error ex)))
    :else (assoc ctx :io.pedestal.interceptor.error/error ex)))
 
+;; TODO: Get auth data using authenticate function instead of authenticate request
+;;       Validate it's not exp, and attach to request :identity.
+;;       authenticated? is just a simple check if :identity exists
 (def authenticate
   {:name ::authenticate
    :enter
@@ -58,7 +61,7 @@
         password (get-in request [:edn-params :password])]
     (if (valid-user? username password)
       (let [claims {:user username
-                    :exp (-> (jt/instant) (jt/plus (jt/days 1)) .toEpochMilli)}
+                    :exp (-> (jt/instant) (jt/plus (jt/seconds 1)) .toEpochMilli)}
             token (jwt/sign claims secret {:alg (keyword jws-algorithm)})]
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
