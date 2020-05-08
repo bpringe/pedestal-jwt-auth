@@ -3,13 +3,16 @@
             [io.pedestal.http.body-params :refer [body-params]]
             [io.pedestal.http.route :as route]
             [io.pedestal.test :as test]
+            [io.pedestal.interceptor.error :refer [error-dispatch]]
             [java-time :as jt]
             [buddy.sign.jwt :as jwt]
-            [buddy.auth.backends.token :refer [jws-backend]]))
+            [buddy.auth.backends.token :refer [jws-backend]]
+            [buddy.auth :as auth]
+            [buddy.auth.middleware :as auth.middleware]))
 
 (def secret "mysupersecret")
-(def jws-algorithm "hs215")
-(def auth-backend (jws-backend {:secret secret :options {:alg (keyword jws-algorithm)}}))
+(def jws-algorithm "hs512")
+(def jws-auth-backend (jws-backend {:secret secret :options {:alg (keyword jws-algorithm)}}))
 
 ;;;; Helpers
 
@@ -21,11 +24,29 @@
 
 ;;;; Interceptors and handlers
 
-(def greet
-  {:name :greet
+(def handle-error
+  (error-dispatch
+   [ctx ex]
+   [{:exception-type :clojure.lang.ExceptionInfo}]
+   (let [response (condp = (-> ex ex-data :type)
+                    :unauthenticated (bad-request "Request is not authenticated"))]
+     (if response
+       (assoc ctx :response response)
+       (assoc ctx :io.pedestal.interceptor.error/error ex)))
+   :else (assoc ctx :io.pedestal.interceptor.error/error ex)))
+
+(def authenticate
+  {:name ::authenticate
    :enter
    (fn [context]
-     (assoc context :response (ok "This route will greet a logged in user by name")))})
+     (let [request (auth.middleware/authentication-request (:request context) jws-auth-backend)]
+       (if (auth/authenticated? request)
+         (assoc context :request request)
+         (throw (ex-info "Unauthenticated" {:type :unauthenticated})))))})
+
+(defn greet [request]
+  (let [name (-> request :identity :user)]
+    (ok (str "Hello " name))))
 
 ;; TODO: Implement some real check
 (defn valid-user?
@@ -38,12 +59,12 @@
     (if (valid-user? username password)
       (let [claims {:user username
                     :exp (-> (jt/instant) (jt/plus (jt/days 1)) .toEpochMilli)}
-            token (jwt/sign claims secret {:alg :hs512})]
+            token (jwt/sign claims secret {:alg (keyword jws-algorithm)})]
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
 
 (def routes
-  #{["/" :get greet :route-name :greet]
+  #{["/" :get [handle-error authenticate greet] :route-name :greet]
     ["/login" :post [(body-params) login] :route-name :login]})
 
 (def service-map
@@ -75,6 +96,15 @@
   (restart)
 
   (test-request :get "/")
-  (test-request :post "/login"
-                :headers {"Content-Type" "application/edn"}
-                :body (pr-str {:username "admin" :password "admin-password"})))
+  (def token (-> (test-request :post "/login"
+                               :headers {"Content-Type" "application/edn"}
+                               :body (pr-str {:username "admin" :password "admin-password"}))
+                 :body
+                 clojure.edn/read-string
+                 :token))
+  
+  (test-request :get "/"
+                :headers 
+                {"Authorization" (str "Token " token)
+                 "Content-Type" "application/edn"}))
+
