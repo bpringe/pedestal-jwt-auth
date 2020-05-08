@@ -9,10 +9,13 @@
             [buddy.auth.backends.token :refer [jws-backend]]
             [buddy.auth :as auth]
             [buddy.auth.middleware :as auth.middleware]))
+;;;; Config
 
 (def secret "mysupersecret")
-(def jws-algorithm "hs512")
-(def jws-auth-backend (jws-backend {:secret secret :options {:alg (keyword jws-algorithm)}}))
+(def jws-algorithm (keyword "hs512"))
+(def jws-auth-backend (jws-backend {:secret secret :options {:alg jws-algorithm}}))
+(def token-exp-seconds (Integer/parseInt "86400"))
+(def service-port (Integer/parseInt "8890"))
 
 ;;;; Helpers
 
@@ -61,8 +64,8 @@
         password (get-in request [:edn-params :password])]
     (if (valid-user? username password)
       (let [claims {:user username
-                    :exp (-> (jt/instant) (jt/plus (jt/seconds 1)) .toEpochMilli (quot 1000))}
-            token (jwt/sign claims secret {:alg (keyword jws-algorithm)})]
+                    :exp (-> (jt/instant) (jt/plus (jt/seconds (* 1 24 60 60))) .toEpochMilli (quot 1000))}
+            token (jwt/sign claims secret {:alg jws-algorithm})]
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
 
@@ -91,12 +94,18 @@
   (stop-dev)
   (start-dev))
 
-(def test-request (partial test/response-for (::http/service-fn @server)))
+(defn test-request
+  [verb url & opts]
+  (-> test/response-for
+      (partial (::http/service-fn @server) verb url)
+      (apply opts)))
 
 (comment
   (start-dev)
   (stop-dev)
   (restart)
+  
+  (apply str "1" "2" nil)
 
   (test-request :get "/")
   (def token (-> (test-request :post "/login"
