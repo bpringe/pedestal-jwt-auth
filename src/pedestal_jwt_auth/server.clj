@@ -61,7 +61,7 @@
         password (get-in request [:edn-params :password])]
     (if (valid-user? username password)
       (let [claims {:user username
-                    :exp (-> (jt/instant) (jt/plus (jt/seconds 1)) .toEpochMilli)}
+                    :exp (-> (jt/instant) (jt/plus (jt/seconds 1)) .toEpochMilli (quot 1000))}
             token (jwt/sign claims secret {:alg (keyword jws-algorithm)})]
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
