@@ -4,12 +4,14 @@
             [io.pedestal.http.route :as route]
             [io.pedestal.test :as test]
             [io.pedestal.interceptor.error :refer [error-dispatch]]
+            [io.pedestal.interceptor.chain :refer [terminate]]
             [java-time :as jt]
             [buddy.sign.jwt :as jwt]
             [buddy.auth.backends.token :refer [jws-backend]]
             [buddy.auth :as auth]
             [buddy.auth.middleware :as auth.middleware]
             [buddy.auth.accessrules :refer [wrap-access-rules]]))
+
 ;;;; Config
 
 (def secret "mysupersecret")
@@ -18,6 +20,11 @@
 (def token-exp-seconds (Integer/parseInt "86400"))
 (def service-port (Integer/parseInt "8890"))
 
+(def users {"admin" {:roles ["admin"]
+                     :password "admin-password"}
+            "joe" {:roles []
+                   :password "joe-password"}})
+
 ;;;; Helpers
 
 (defn response [status body & {:as headers}]
@@ -25,6 +32,7 @@
 
 (def ok (partial response 200))
 (def bad-request (partial response 400))
+(def unauthorized (partial response 403))
 
 ;;;; Interceptors and handlers
 
@@ -37,11 +45,9 @@
      (if response
        (assoc ctx :response response)
        (assoc ctx :io.pedestal.interceptor.error/error ex)))
-   :else (assoc ctx :io.pedestal.interceptor.error/error ex)))
+   :else
+   (assoc ctx :io.pedestal.interceptor.error/error ex)))
 
-;; TODO: Get auth data using authenticate function instead of authenticate request
-;;       Validate it's not exp, and attach to request :identity.
-;;       authenticated? is just a simple check if :identity exists
 (def authenticate
   {:name ::authenticate
    :enter
@@ -52,52 +58,41 @@
          (throw (ex-info "Unauthenticated" {:type :unauthenticated})))))})
 
 (defn greet [request]
-  (let [name (-> request :identity :user)]
-    (ok (str "Hello " name))))
-
-;; TODO: Implement some real check
-(defn valid-user?
-  [username password]
-  true)
+  (let [username (-> request :identity :sub)]
+    (ok (str "Hello " username))))
 
 (defn login [request]
   (let [username (get-in request [:edn-params :username])
-        password (get-in request [:edn-params :password])]
-    (if (valid-user? username password)
-      (let [claims {:user username
-                    :exp (-> (jt/instant) (jt/plus (jt/seconds (* 1 24 60 60))) .toEpochMilli (quot 1000))}
+        password (get-in request [:edn-params :password])
+        user (get users username)]
+    (if (= password (:password user))
+      (let [claims {:sub username
+                    :exp (-> (jt/instant) (jt/plus (jt/seconds (* 1 24 60 60))) .toEpochMilli (quot 1000))
+                    :roles (:roles user)}
             token (jwt/sign claims secret {:alg jws-algorithm})]
         (ok {:token token}))
       (bad-request {:message "Username or password is incorrect"}))))
 
-(defn authenticated-access [request]
-  (boolean (:identity request)))
-
-(defn authenticated-access-error-fn
-  [req value]
-  (bad-request "Request is not authenticated (access rule error)"))
-
 (defn admin-access [request]
-  (prn "running admin-access handler")
   (let [roles (-> request :identity :roles)]
-    (boolean (roles :admin))))
+    (boolean (some #{"admin"} roles))))
 
-(def access-rules [{:pattern #"^/admin.*"
-                    :handler admin-access}
-                   {:pattern #"^/.*"
-                    :handler authenticated-access
-                    :on-error authenticated-access-error-fn}])
+(def access-rules [{:uri "/admin"
+                    :handler admin-access}])
 
 (def authorize
   {:name ::authorize
    :enter
    (fn [context]
      (let [request (:request context)
-           handler (wrap-access-rules identity
-                                      {:rules access-rules})
-           result (handler request)]
-       (prn "result:" result)
-       context))})
+           authorize-request (wrap-access-rules
+                              identity
+                              {:rules access-rules
+                               :on-error (fn [_ _] (unauthorized "Not authorized"))})
+           response (authorize-request request)]
+       (if (= request response)
+         context
+         (terminate (assoc context :response response)))))})
 
 (def routes
   #{["/" :get [handle-error authenticate greet] :route-name :greet]
