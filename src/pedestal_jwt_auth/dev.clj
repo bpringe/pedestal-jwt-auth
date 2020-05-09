@@ -8,7 +8,6 @@
   (-> service/service
       (merge {:env :dev
               ::http/join? false
-              ;; TODO: Make sure new routes or route changes are picked up without server restart
               ::http/routes #(route/expand-routes service/routes)})
       http/default-interceptors
       http/dev-interceptors
