@@ -32,7 +32,7 @@
 
 (def ok (partial response 200))
 (def bad-request (partial response 400))
-(def unauthorized (partial response 403))
+(def unauthorized (partial response 401))
 
 ;;;; Interceptors and handlers
 
