@@ -42,22 +42,6 @@
          (assoc context :request request)
          (terminate (assoc context :response (unauthorized "Not authorized"))))))})
 
-(defn greet [request]
-  (let [username (-> request :identity :sub)]
-    (ok (str "Hello " username))))
-
-(defn login [request]
-  (let [username (get-in request [:edn-params :username])
-        password (get-in request [:edn-params :password])
-        user (get users username)]
-    (if (= password (:password user))
-      (let [claims {:sub username
-                    :exp (-> (jt/instant) (jt/plus (jt/seconds (* 1 24 60 60))) .toEpochMilli (quot 1000))
-                    :roles (:roles user)}
-            token (jwt/sign claims secret {:alg jws-algorithm})]
-        (ok {:token token}))
-      (bad-request {:message "Username or password is incorrect"}))))
-
 (defn admin-access [request]
   (let [roles (-> request :identity :roles)]
     (boolean (some #{"admin"} roles))))
@@ -78,6 +62,22 @@
        (if (= request response)
          context
          (terminate (assoc context :response response)))))})
+
+(defn greet [request]
+  (let [username (-> request :identity :sub)]
+    (ok (str "Hello " username))))
+
+(defn login [request]
+  (let [username (get-in request [:edn-params :username])
+        password (get-in request [:edn-params :password])
+        user (get users username)]
+    (if (= password (:password user))
+      (let [claims {:sub username
+                    :exp (-> (jt/instant) (jt/plus (jt/seconds (* 1 24 60 60))) .toEpochMilli (quot 1000))
+                    :roles (:roles user)}
+            token (jwt/sign claims secret {:alg jws-algorithm})]
+        (ok {:token token}))
+      (bad-request {:message "Username or password is incorrect"}))))
 
 (def routes
   #{["/" :get [authenticate greet] :route-name :greet]

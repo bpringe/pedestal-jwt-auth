@@ -1,6 +1,5 @@
 (ns pedestal-jwt-auth.dev
   (:require [io.pedestal.test :as test]
-            [pedestal-jwt-auth.server :as server]
             [pedestal-jwt-auth.service :as service]
             [io.pedestal.http.route :as route]
             [io.pedestal.http :as http]))
