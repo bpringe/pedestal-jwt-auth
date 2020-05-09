@@ -1,7 +1,6 @@
 (ns pedestal-jwt-auth.service
   (:require [io.pedestal.http :as http]
             [io.pedestal.http.body-params :refer [body-params]]
-            [io.pedestal.interceptor.error :refer [error-dispatch]]
             [io.pedestal.interceptor.chain :refer [terminate]]
             [java-time :as jt]
             [buddy.sign.jwt :as jwt]
@@ -34,18 +33,6 @@
 
 ;;;; Interceptors and handlers
 
-(def handle-error
-  (error-dispatch
-   [ctx ex]
-   [{:exception-type :clojure.lang.ExceptionInfo}]
-   (let [response (condp = (-> ex ex-data :type)
-                    :unauthenticated (bad-request "Request is not authenticated"))]
-     (if response
-       (assoc ctx :response response)
-       (assoc ctx :io.pedestal.interceptor.error/error ex)))
-   :else
-   (assoc ctx :io.pedestal.interceptor.error/error ex)))
-
 (def authenticate
   {:name ::authenticate
    :enter
@@ -53,7 +40,7 @@
      (let [request (auth.middleware/authentication-request (:request context) jws-auth-backend)]
        (if (auth/authenticated? request)
          (assoc context :request request)
-         (throw (ex-info "Unauthenticated" {:type :unauthenticated})))))})
+         (terminate (assoc context :response (unauthorized "Not authorized"))))))})
 
 (defn greet [request]
   (let [username (-> request :identity :sub)]
@@ -93,9 +80,9 @@
          (terminate (assoc context :response response)))))})
 
 (def routes
-  #{["/" :get [handle-error authenticate greet] :route-name :greet]
+  #{["/" :get [authenticate greet] :route-name :greet]
     ["/login" :post [(body-params) login] :route-name :login]
-    ["/admin" :get [handle-error authenticate authorize greet] :route-name :admin]})
+    ["/admin" :get [authenticate authorize greet] :route-name :admin]})
 
 (def service {:env :prod
               ::http/routes routes

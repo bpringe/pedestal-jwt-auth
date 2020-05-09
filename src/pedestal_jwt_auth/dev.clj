@@ -1,12 +1,31 @@
 (ns pedestal-jwt-auth.dev
   (:require [io.pedestal.test :as test]
-            [pedestal-jwt-auth.server :as server]))
+            [pedestal-jwt-auth.server :as server]
+            [pedestal-jwt-auth.service :as service]
+            [io.pedestal.http.route :as route]
+            [io.pedestal.http :as http]))
+
+(defn create-dev-server []
+  (-> service/service
+      (merge {:env :dev
+              ::http/join? false
+              ;; TODO: Make sure new routes or route changes are picked up without server restart
+              ::http/routes #(route/expand-routes service/routes)})
+      http/default-interceptors
+      http/dev-interceptors
+      http/create-server))
 
 (defn test-request
   [verb url & opts]
   (-> test/response-for
-      (partial (:io.pedestal.http/service-fn (server/create-dev-server)) verb url)
+      (partial (::http/service-fn (create-dev-server)) verb url)
       (apply opts)))
+
+(defn -main
+  [& args]
+  (println "\nCreating the [DEV] server...")
+  (-> (create-dev-server)
+      http/start))
 
 (comment
   (test-request :get "/")
